@@ -7,7 +7,19 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 const createPrismaClient = () => {
-  // DATABASE_URL is "file:./dev.db" where ./ is relative to project root
+  const tursoUrl = process.env.TURSO_DATABASE_URL;
+  const tursoToken = process.env.TURSO_AUTH_TOKEN;
+
+  // Production: use Turso cloud database
+  if (tursoUrl && tursoToken) {
+    const adapter = new PrismaLibSql({
+      url: tursoUrl,
+      authToken: tursoToken,
+    });
+    return new PrismaClient({ adapter });
+  }
+
+  // Development: use local SQLite file
   const relativePath = process.env.DATABASE_URL?.replace("file:", "") || "./dev.db";
   const dbPath = path.resolve(process.cwd(), relativePath);
 
