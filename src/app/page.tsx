@@ -1,39 +1,57 @@
 import Link from "next/link";
+import { prisma } from "@/lib/prisma";
 import BlogCard from "@/components/BlogCard";
 import Pagination from "@/components/Pagination";
 
-interface TagCount {
-  tag: string;
-  count: number;
-}
-
 async function getPosts(page: number, tag?: string) {
-  const params = new URLSearchParams();
-  params.set("page", String(page));
-  params.set("pageSize", "10");
-  if (tag) params.set("tag", tag);
+  const pageSize = 10;
+  const where: Record<string, unknown> = { published: true };
+  if (tag) where.tags = { contains: tag };
 
-  const baseUrl = process.env.AUTH_URL || "http://localhost:3000";
-  const res = await fetch(`${baseUrl}/api/posts?${params.toString()}`, {
-    cache: "no-store",
-  });
+  const [posts, total] = await Promise.all([
+    prisma.post.findMany({
+      where,
+      include: {
+        author: { select: { id: true, name: true, avatar: true } },
+        _count: { select: { comments: true, likes: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    prisma.post.count({ where }),
+  ]);
 
-  if (!res.ok) {
-    return { data: [], total: 0, page: 1, pageSize: 10, totalPages: 0 };
-  }
-
-  return res.json();
+  return {
+    data: posts,
+    total,
+    page,
+    pageSize,
+    totalPages: Math.ceil(total / pageSize),
+  };
 }
 
 async function getTags() {
-  const baseUrl = process.env.AUTH_URL || "http://localhost:3000";
-  const res = await fetch(`${baseUrl}/api/tags`, { cache: "no-store" });
+  const posts = await prisma.post.findMany({
+    where: { published: true },
+    select: { tags: true },
+  });
 
-  if (!res.ok) {
-    return [];
+  const tagMap = new Map<string, number>();
+  for (const post of posts) {
+    if (post.tags) {
+      try {
+        for (const t of JSON.parse(post.tags) as string[]) {
+          const trimmed = t.trim();
+          if (trimmed) tagMap.set(trimmed, (tagMap.get(trimmed) || 0) + 1);
+        }
+      } catch { /* skip */ }
+    }
   }
 
-  return res.json();
+  return Array.from(tagMap.entries())
+    .map(([tag, count]) => ({ tag, count }))
+    .sort((a, b) => b.count - a.count);
 }
 
 export default async function HomePage({
@@ -63,7 +81,6 @@ export default async function HomePage({
         </p>
       </div>
 
-      {/* Tag Cloud */}
       {tags.length > 0 && (
         <div className="mb-8 flex flex-wrap gap-2">
           <Link
@@ -76,7 +93,7 @@ export default async function HomePage({
           >
             全部
           </Link>
-          {tags.map((t: TagCount) => (
+          {tags.map((t) => (
             <Link
               key={t.tag}
               href={`/?tag=${encodeURIComponent(t.tag)}`}
@@ -92,7 +109,6 @@ export default async function HomePage({
         </div>
       )}
 
-      {/* Blog List */}
       {postsData.data.length === 0 ? (
         <div className="text-center py-20">
           <div className="text-6xl mb-4">📭</div>
@@ -103,25 +119,9 @@ export default async function HomePage({
         </div>
       ) : (
         <div className="flex flex-col gap-4">
-          {postsData.data.map(
-            (post: {
-              id: string;
-              title: string;
-              slug: string;
-              excerpt: string | null;
-              coverImage: string | null;
-              tags: string | null;
-              author: {
-                id: string;
-                name: string;
-                avatar: string | null;
-              };
-              _count: { comments: number; likes: number };
-              createdAt: string;
-            }) => (
-              <BlogCard key={post.id} post={post} />
-            )
-          )}
+          {postsData.data.map((post) => (
+            <BlogCard key={post.id} post={post} />
+          ))}
         </div>
       )}
 

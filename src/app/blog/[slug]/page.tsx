@@ -6,20 +6,8 @@ import rehypeSlug from "rehype-slug";
 import CommentSection from "@/components/CommentSection";
 import LikeButton from "@/components/LikeButton";
 import { formatDate } from "@/lib/utils";
+import { prisma } from "@/lib/prisma";
 import Link from "next/link";
-
-async function getPost(slug: string) {
-  const baseUrl = process.env.AUTH_URL || "http://localhost:3000";
-  const res = await fetch(`${baseUrl}/api/posts/${slug}`, {
-    cache: "no-store",
-  });
-
-  if (!res.ok) {
-    return null;
-  }
-
-  return res.json();
-}
 
 export default async function BlogDetailPage({
   params,
@@ -27,7 +15,20 @@ export default async function BlogDetailPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const post = await getPost(slug);
+
+  const post = await prisma.post.findFirst({
+    where: { OR: [{ id: slug }, { slug }] },
+    include: {
+      author: { select: { id: true, name: true, avatar: true, bio: true } },
+      comments: {
+        include: {
+          author: { select: { id: true, name: true, avatar: true } },
+        },
+        orderBy: { createdAt: "desc" },
+      },
+      _count: { select: { comments: true, likes: true } },
+    },
+  });
 
   if (!post) {
     notFound();
@@ -37,7 +38,6 @@ export default async function BlogDetailPage({
 
   return (
     <article className="max-w-3xl mx-auto">
-      {/* Header */}
       <header className="mb-8">
         <Link
           href="/"
@@ -73,7 +73,6 @@ export default async function BlogDetailPage({
         )}
       </header>
 
-      {/* Content */}
       <div className="prose prose-gray max-w-none mb-8 bg-white rounded-xl border border-gray-200 p-8">
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
@@ -83,12 +82,10 @@ export default async function BlogDetailPage({
         </ReactMarkdown>
       </div>
 
-      {/* Like */}
       <div className="flex items-center justify-center mb-8">
         <LikeButton postId={post.id} initialCount={post._count.likes} />
       </div>
 
-      {/* Comments */}
       <CommentSection postId={post.id} initialComments={post.comments} />
     </article>
   );
